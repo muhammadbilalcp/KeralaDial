@@ -1,0 +1,6 @@
+{
+  "name": "KeralaDial - Kerala's Local Search Engine",
+  "description": "Find places, localities, and registered businesses across all 14 districts of Kerala with direct phone calling, WhatsApp chat, and customer reviews.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

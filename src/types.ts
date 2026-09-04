@@ -80,8 +80,12 @@ export interface BusinessListing {
   description: string;
   rating: number;
   reviews: UserReview[];
+  photos?: string[];
+  coverImage?: string;
   isVerified: boolean;
   registeredAt: string;
+  ownerUid?: string;
+  ownerEmail?: string;
 }
 
 export interface DistrictInfo {

@@ -7,8 +7,11 @@ import {
 import { 
   saveBusinessToFirestore, 
   addReviewToFirestore, 
-  subscribeToBusinessesFromFirestore 
+  subscribeToBusinessesFromFirestore,
+  subscribeToAuth,
+  logoutUser
 } from './lib/firebase';
+import { User as FirebaseUser } from 'firebase/auth';
 import { 
   PlaceItem, 
   KeralaDistrict, 
@@ -30,6 +33,8 @@ import { BookmarksDrawer } from './components/BookmarksDrawer';
 import { ExportModal } from './components/ExportModal';
 import { RegisterBusinessModal } from './components/RegisterBusinessModal';
 import { BusinessDetailModal } from './components/BusinessDetailModal';
+import { AuthModal } from './components/AuthModal';
+import { MobileBottomNav } from './components/MobileBottomNav';
 import { Footer } from './components/Footer';
 import { 
   LayoutGrid, 
@@ -45,7 +50,9 @@ import {
   Plus,
   Phone,
   MessageSquare,
-  Database
+  Database,
+  ShieldCheck,
+  Building2
 } from 'lucide-react';
 
 const LOCAL_STORAGE_PLACES_KEY = 'keraladial_enriched_places';
@@ -54,6 +61,19 @@ const LOCAL_STORAGE_BUSINESSES_KEY = 'keraladial_registered_businesses';
 const ITEMS_PER_PAGE = 24;
 
 export default function App() {
+  // Firebase Auth State
+  const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [authPrompt, setAuthPrompt] = useState<{ title?: string; message?: string }>({});
+  const [showMyListingsOnly, setShowMyListingsOnly] = useState(false);
+
+  // Subscribe to Firebase Auth state
+  useEffect(() => {
+    const unsubscribe = subscribeToAuth((user) => {
+      setCurrentUser(user);
+    });
+    return () => unsubscribe();
+  }, []);
   // Places state with local storage overrides
   const [places, setPlaces] = useState<PlaceItem[]>(() => {
     try {
@@ -178,6 +198,28 @@ export default function App() {
     }, 2800);
   };
 
+  // Check for shared business link in URL params or hash
+  useEffect(() => {
+    const handleUrlCheck = () => {
+      const params = new URLSearchParams(window.location.search);
+      const bizParam = params.get('biz');
+      const hash = window.location.hash.replace('#', '');
+      const targetId = bizParam || (hash.startsWith('biz-') ? hash : null);
+
+      if (targetId && businesses.length > 0) {
+        const found = businesses.find((b) => b.id === targetId);
+        if (found) {
+          setSelectedBusinessDetail(found);
+          setSearchTab('businesses');
+        }
+      }
+    };
+
+    handleUrlCheck();
+    window.addEventListener('hashchange', handleUrlCheck);
+    return () => window.removeEventListener('hashchange', handleUrlCheck);
+  }, [businesses]);
+
   // Handle Bookmarks
   const handleToggleBookmark = (place: PlaceItem) => {
     setBookmarks((prev) => {
@@ -210,12 +252,11 @@ export default function App() {
       return updated;
     });
 
-    showToast(`Saving "${newBiz.name}" to Firebase database...`);
-    setSelectedBusinessDetail(newBiz);
+    showToast(`Saving "${newBiz.name}" to Live Directory...`);
 
     const res = await saveBusinessToFirestore(newBiz);
     if (res.success) {
-      showToast(`"${newBiz.name}" is now live in database!`);
+      showToast(`"${newBiz.name}" is now live in directory!`);
     } else {
       showToast(`Saved locally (${res.error || 'Offline mode'})`);
     }
@@ -263,6 +304,20 @@ export default function App() {
     if (res.success) {
       showToast('Feedback submitted and synced with database!');
     }
+  };
+
+  // Auth Action Handlers
+  const handleSignOut = async () => {
+    const res = await logoutUser();
+    if (res.success) {
+      setShowMyListingsOnly(false);
+      showToast('Signed out from Firebase');
+    }
+  };
+
+  const handleOpenAuth = (title?: string, message?: string) => {
+    setAuthPrompt({ title, message });
+    setIsAuthModalOpen(true);
   };
 
   // Save enriched or added place
@@ -392,6 +447,14 @@ export default function App() {
       if (selectedDistrict !== 'All' && b.district !== selectedDistrict) return false;
       if (selectedBusinessCategory !== 'All' && b.businessCategory !== selectedBusinessCategory) return false;
 
+      // Filter to only logged in user's businesses if requested
+      if (showMyListingsOnly) {
+        if (!currentUser) return false;
+        const isOwner = b.ownerUid === currentUser.uid || 
+          (currentUser.email && b.ownerEmail && b.ownerEmail.toLowerCase() === currentUser.email.toLowerCase());
+        if (!isOwner) return false;
+      }
+
       if (q) {
         const matchesName = b.name.toLowerCase().includes(q);
         const matchesCategory = b.businessCategory.toLowerCase().includes(q);
@@ -413,7 +476,7 @@ export default function App() {
       }
       return true;
     });
-  }, [businesses, query, selectedDistrict, selectedBusinessCategory, searchTab]);
+  }, [businesses, query, selectedDistrict, selectedBusinessCategory, searchTab, showMyListingsOnly, currentUser]);
 
   // Unified items list with sorting
   type UnifiedItem = { type: 'place'; data: PlaceItem } | { type: 'business'; data: BusinessListing };
@@ -481,16 +544,16 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-neutral-100 flex flex-col text-neutral-900 font-sans selection:bg-amber-100 selection:text-amber-900">
+    <div className="min-h-screen bg-neutral-100 flex flex-col text-neutral-900 font-sans selection:bg-amber-100 selection:text-amber-900 pb-16 md:pb-0">
       {/* Toast Notification */}
       {toastMessage && (
-        <div className="fixed bottom-5 right-5 z-50 bg-neutral-900 text-white text-xs font-semibold px-4 py-2.5 rounded-xl shadow-xl flex items-center gap-2 border border-neutral-700 animate-in fade-in slide-in-from-bottom-2">
+        <div className="fixed bottom-20 md:bottom-5 right-5 z-50 bg-neutral-900 text-white text-xs font-semibold px-4 py-2.5 rounded-xl shadow-xl flex items-center gap-2 border border-neutral-700 animate-in fade-in slide-in-from-bottom-2">
           <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" />
           <span>{toastMessage}</span>
         </div>
       )}
 
-      {/* Main Header with Register Business and Saved buttons */}
+      {/* Main Header with Register Business, Saved, and Auth */}
       <Header
         onAddPlaceClick={() => {
           setEnrichPlaceTarget(null);
@@ -501,6 +564,14 @@ export default function App() {
         bookmarkCount={bookmarks.size}
         onExportClick={() => setIsExportOpen(true)}
         onEnquiryClick={() => setEnquiryPlace(null)}
+        currentUser={currentUser}
+        onAuthClick={() => handleOpenAuth()}
+        onSignOut={handleSignOut}
+        onMyListingsClick={() => {
+          setSearchTab('businesses');
+          setShowMyListingsOnly(true);
+          showToast('Showing your registered businesses');
+        }}
       />
 
       {/* 14 District Navigation Bar */}
@@ -514,13 +585,17 @@ export default function App() {
       {/* Search Engine Centerpiece */}
       <div className="bg-gradient-to-b from-amber-500/10 via-amber-500/5 to-transparent pt-8 pb-6 px-4 border-b border-neutral-200">
         <div className="max-w-7xl mx-auto text-center space-y-4">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white border border-amber-200 text-amber-900 text-xs font-semibold shadow-2xs">
-            <Sparkles className="w-3.5 h-3.5 text-amber-600" />
-            <span>Kerala Local Search Engine &bull; All 14 Districts</span>
-            <span className="text-neutral-300">&bull;</span>
-            <span className="inline-flex items-center gap-1.5 text-emerald-700 font-semibold">
-              <Database className="w-3.5 h-3.5 text-emerald-600" />
-              <span>Firebase Database Active (ziloclips)</span>
+          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-white border border-amber-200 text-amber-900 text-xs font-semibold shadow-2xs flex-wrap justify-center">
+            <span className="inline-flex items-center gap-1.5 text-emerald-700 font-bold">
+              <ShieldCheck className="w-4 h-4 text-emerald-600" />
+              <span>Free Public Search &bull; No Signup Required</span>
+            </span>
+            <span className="text-neutral-300 hidden sm:inline">&bull;</span>
+            <span className="text-neutral-600">All 14 Districts &bull; 800+ Places &amp; Towns</span>
+            <span className="text-neutral-300 hidden sm:inline">&bull;</span>
+            <span className="inline-flex items-center gap-1.5 text-neutral-600 font-medium text-[11px]">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+              <span>Live Cloud Directory</span>
             </span>
           </div>
 
@@ -529,7 +604,7 @@ export default function App() {
           </h1>
 
           <p className="text-sm sm:text-base text-neutral-600 max-w-2xl mx-auto">
-            Search 800+ towns, panchayats, stores, clinics, taxi services, and resorts across all 14 Kerala districts.
+            Instant search across 800+ localities, panchayats, and real registered businesses in Kerala. No signup needed to search, view phone numbers, or WhatsApp.
           </p>
 
           {/* Central Search Bar */}
@@ -645,10 +720,26 @@ export default function App() {
                 &ldquo;{query}&rdquo;
               </span>
             )}
+            {showMyListingsOnly && (
+              <span className="text-xs bg-emerald-50 text-emerald-800 border border-emerald-300 px-2.5 py-0.5 rounded-full font-semibold flex items-center gap-1.5">
+                <Building2 className="w-3.5 h-3.5 text-emerald-600" />
+                <span>My Registered Businesses</span>
+                <button
+                  onClick={() => setShowMyListingsOnly(false)}
+                  className="hover:text-emerald-950 font-bold ml-1 cursor-pointer"
+                  title="Clear filter"
+                >
+                  &times;
+                </button>
+              </span>
+            )}
 
-            {(selectedDistrict !== 'All' || query || selectedPlaceCategory !== 'All' || selectedBusinessCategory !== 'All') && (
+            {(selectedDistrict !== 'All' || query || selectedPlaceCategory !== 'All' || selectedBusinessCategory !== 'All' || showMyListingsOnly) && (
               <button
-                onClick={handleResetFilters}
+                onClick={() => {
+                  handleResetFilters();
+                  setShowMyListingsOnly(false);
+                }}
                 className="text-xs text-amber-700 hover:text-amber-900 hover:underline flex items-center gap-1 font-semibold ml-1 cursor-pointer"
               >
                 <RotateCcw className="w-3 h-3" />
@@ -717,8 +808,8 @@ export default function App() {
                 <Store className="w-8 h-8" />
               </div>
               <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-100 text-emerald-800 text-[11px] font-bold mb-3">
-                <Database className="w-3.5 h-3.5 text-emerald-700" />
-                <span>Firebase Database Live (ziloclips)</span>
+                <span className="w-2 h-2 rounded-full bg-emerald-600"></span>
+                <span>Live Kerala Directory</span>
               </div>
               <h3 className="font-bold text-neutral-900 text-xl mb-2 font-display">
                 All Mock Businesses Removed &bull; Ready for Real Registrations
@@ -882,6 +973,7 @@ export default function App() {
         isOpen={selectedBusinessDetail !== null}
         onClose={() => setSelectedBusinessDetail(null)}
         onAddReview={handleAddReview}
+        currentUser={currentUser}
       />
 
       {/* Register Business Modal */}
@@ -890,6 +982,24 @@ export default function App() {
         onClose={() => setIsRegisterBusinessOpen(false)}
         onRegister={handleRegisterBusiness}
         initialDistrict={selectedDistrict}
+        currentUser={currentUser}
+        onOpenAuth={() => handleOpenAuth('Sign In to Register Business', 'Sign in with your email or Google to register and link your business to your account.')}
+        onViewBusiness={(biz) => {
+          setIsRegisterBusinessOpen(false);
+          setSelectedBusinessDetail(biz);
+        }}
+      />
+
+      {/* Firebase Authentication Modal */}
+      <AuthModal
+        isOpen={isAuthModalOpen}
+        onClose={() => setIsAuthModalOpen(false)}
+        currentUser={currentUser}
+        onSuccess={(user) => {
+          showToast(`Signed in as ${user.displayName || user.email || 'User'}`);
+        }}
+        promptTitle={authPrompt.title}
+        promptMessage={authPrompt.message}
       />
 
       {/* Enrich Place Modal */}
@@ -934,6 +1044,20 @@ export default function App() {
           window.scrollTo({ top: 0, behavior: 'smooth' });
         }}
         onOpenEnquiry={() => setEnquiryPlace(null)}
+      />
+
+      {/* Mobile Bottom Navigation */}
+      <MobileBottomNav
+        searchTab={searchTab}
+        onSelectTab={(tab) => setSearchTab(tab)}
+        onOpenRegister={() => setIsRegisterBusinessOpen(true)}
+        onOpenBookmarks={() => setIsBookmarksOpen(true)}
+        bookmarkCount={bookmarks.size}
+        currentUser={currentUser}
+        onOpenAuth={() => handleOpenAuth()}
+        onScrollToSearch={() => {
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        }}
       />
     </div>
   );
